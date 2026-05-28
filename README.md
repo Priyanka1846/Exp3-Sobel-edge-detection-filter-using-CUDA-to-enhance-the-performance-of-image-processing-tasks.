@@ -41,39 +41,43 @@ Discuss the differences in execution time and output quality.
 #include <stdlib.h>
 #include <math.h>
 #include <cuda_runtime.h>
-#include <opencv2/opencv.hpp>
+#include </usr/include/opencv4/opencv2/opencv.hpp>
 
 using namespace cv;
 
-__global__ void sobelFilter(unsigned char *srcImage, unsigned char *dstImage,
-                            unsigned int width, unsigned int height) {
+__global__ void sobelFilter(unsigned char *srcImage, unsigned char *dstImage, unsigned int width, unsigned int height) {
 
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
-    int y = blockIdx.y * blockDim.y + threadIdx.y;
+int x = blockIdx.x * blockDim.x + threadIdx.x;
+int y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (x >= 1 && x < width-1 && y >= 1 && y < height-1) {
+if (x >= 1 && x < width-1 && y >= 1 && y < height-1) {
 
-        int Gx[3][3] = {{-1,0,1},{-2,0,2},{-1,0,1}};
-        int Gy[3][3] = {{1,2,1},{0,0,0},{-1,-2,-1}};
+    int Gx[3][3] = {{-1,0,1},{-2,0,2},{-1,0,1}};
+    int Gy[3][3] = {{1,2,1},{0,0,0},{-1,-2,-1}};
 
-        int sumX = 0;
-        int sumY = 0;
+    int sumX = 0;
+    int sumY = 0;
 
-        for(int i=-1;i<=1;i++){
-            for(int j=-1;j<=1;j++){
-                unsigned char pixel = srcImage[(y+i)*width + (x+j)];
-                sumX += pixel * Gx[i+1][j+1];
-                sumY += pixel * Gy[i+1][j+1];
-            }
+    for(int i=-1;i<=1;i++){
+        for(int j=-1;j<=1;j++){
+
+            unsigned char pixel =
+            srcImage[(y+i)*width + (x+j)];
+
+            sumX += pixel * Gx[i+1][j+1];
+            sumY += pixel * Gy[i+1][j+1];
         }
-
-        int magnitude = sqrtf(sumX*sumX + sumY*sumY);
-        magnitude = min(max(magnitude,0),255);
-
-        dstImage[y*width + x] = (unsigned char)magnitude;
     }
-}
 
+    int magnitude =
+    sqrtf(sumX*sumX + sumY*sumY);
+
+    magnitude = min(max(magnitude,0),255);
+
+    dstImage[y*width + x] =
+    (unsigned char)magnitude;
+}
+} 
 void checkCudaErrors(cudaError_t r) {
     if (r != cudaSuccess) {
         fprintf(stderr, "CUDA Error: %s\n", cudaGetErrorString(r));
@@ -82,8 +86,8 @@ void checkCudaErrors(cudaError_t r) {
 }
 
 int main() {
-
-    Mat image = imread("/content/lion.jpg", IMREAD_GRAYSCALE);
+    // Read input image
+    Mat image = imread("/content/racoon.jpg", IMREAD_GRAYSCALE);
 
     if (image.empty()) {
         printf("Error: Image not found.\n");
@@ -92,42 +96,65 @@ int main() {
 
     int width = image.cols;
     int height = image.rows;
-
     size_t imageSize = width * height * sizeof(unsigned char);
 
-    unsigned char *h_outputImage = (unsigned char*)malloc(imageSize);
+    // Allocate host memory for output image
+    unsigned char *h_outputImage = (unsigned char *)malloc(imageSize);
+    if (h_outputImage == nullptr) {
+        fprintf(stderr, "Failed to allocate host memory\n");
+        return -1;
+    }
 
+    // Allocate device memory
     unsigned char *d_inputImage, *d_outputImage;
+    checkCudaErrors(cudaMalloc(&d_inputImage, imageSize));
+    checkCudaErrors(cudaMalloc(&d_outputImage, imageSize));
+    checkCudaErrors(cudaMemcpy(d_inputImage, image.data, imageSize, cudaMemcpyHostToDevice));
 
-    checkCudaErrors(cudaMalloc(&d_inputImage,imageSize));
-    checkCudaErrors(cudaMalloc(&d_outputImage,imageSize));
+    // Define CUDA events for timing
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop);
 
-    checkCudaErrors(cudaMemcpy(d_inputImage,
-                               image.data,
-                               imageSize,
-                               cudaMemcpyHostToDevice));
+    // Launch kernel
+    dim3 blockSize(16, 16);
+    dim3 gridSize(ceil(width / 16.0), ceil(height / 16.0));
 
-    dim3 blockSize(16,16);
-    dim3 gridSize((width+15)/16,(height+15)/16);
+    cudaEventRecord(start);
+    sobelFilter<<<gridSize, blockSize>>>(d_inputImage, d_outputImage, width, height);
+    cudaEventRecord(stop);
 
-    sobelFilter<<<gridSize,blockSize>>>(d_inputImage,d_outputImage,width,height);
+    // Synchronize events
+    cudaEventSynchronize(stop);
 
-    checkCudaErrors(cudaMemcpy(h_outputImage,
-                               d_outputImage,
-                               imageSize,
-                               cudaMemcpyDeviceToHost));
+    // Calculate elapsed time
+    float milliseconds = 0;
+    cudaEventElapsedTime(&milliseconds, start, stop);
 
-    Mat outputImage(height,width,CV_8UC1,h_outputImage);
+    // Copy result back to host
+    checkCudaErrors(cudaMemcpy(h_outputImage, d_outputImage, imageSize, cudaMemcpyDeviceToHost));
 
-    imwrite("output_sobel.jpeg",outputImage);
+    // Write output image
+    Mat outputImage(height, width, CV_8UC1, h_outputImage);
+    imwrite("output_sobel.jpeg", outputImage);
 
-    printf("Edge detection completed.\n");
+    // Free memory
+    free(h_outputImage);
+    cudaFree(d_inputImage);
+    cudaFree(d_outputImage);
+
+    // Destroy CUDA events
+    cudaEventDestroy(start);
+    cudaEventDestroy(stop);
+
+    // Print elapsed time
+    printf("Total time taken: %f milliseconds\n", milliseconds);
 
     return 0;
 }
 ~~~
 ## OUTPUT:
-<img width="762" height="394" alt="image" src="https://github.com/user-attachments/assets/028036e5-4328-477c-846d-4cf35bfca0ad" />
+<img width="515" height="380" alt="image" src="https://github.com/user-attachments/assets/b3e62c72-66fc-44bd-919a-c0f7748c7e0b" />
 
 ## RESULT:
 Thus the program has been executed by using CUDA to perform Sobel edge detection on an image using GPU parallel processing
